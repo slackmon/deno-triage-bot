@@ -1,4 +1,4 @@
-# Next-gen Slack platform project template - Reverse String
+# Next-gen Slack platform project template - TriageBot
 
 This repo contains a Slack Function to "triage" a channel, by scanning the message history for a given number of days, searching for key emoji which signify priority.
 
