@@ -3,10 +3,8 @@ import { SlackAPI } from "deno-slack-api/mod.ts";
 
 // deno-lint-ignore no-explicit-any
 const triage_channel: FunctionHandler<any, any> = async ({ inputs, token }) => {
-  console.log(inputs);
-  console.log(token);
-  const client = SlackAPI(token, {});
-  const triageStats = {
+  const client = SlackAPI(token, {}); // Create an instance of a SlackAPI client so we can call the Slack API
+  const triageStats: TopLevelTriageStats = {
     urgent: {
       pending: 0,
       in_review: 0,
@@ -29,10 +27,12 @@ const triage_channel: FunctionHandler<any, any> = async ({ inputs, token }) => {
 
   try {
     // Make sure to join the channel so we can read the messages (only works for public channels)
+    // https://api.slack.com/methods/conversations.join
     await client.apiCall("conversations.join", {
       channel: inputs.targetChannel,
     });
 
+    // Convert the inputted value into a UNIX TS for conversations.history
     if (!isNaN(+inputs.daysToLookback)) {
       lookbackNumber = Number(+inputs.daysToLookback);
     }
@@ -40,75 +40,33 @@ const triage_channel: FunctionHandler<any, any> = async ({ inputs, token }) => {
     startDate.setDate(startDate.getDate() - lookbackNumber);
 
     // Get all the messages for X days
+    // https://api.slack.com/methods/conversations.history
     const messageHistory = await client.apiCall("conversations.history", {
-      channel: inputs.targetChannel,
+      channel: inputs.targetChannel, // The channel specified by the user when the function was called
       inclusive: true,
       oldest: Math.floor(startDate.getTime() / 1000),
     });
-    console.log(messageHistory);
 
-    const messages: Message[] = messageHistory.messages as Message[];
+    const messages: Message[] = messageHistory.messages as Message[]; // Type the response from the API to make it easier to handle
 
+    // Iterate over the messages in the channel
     for (const message of messages) {
       if (message.text && message.text.includes(":red_circle:")) {
-        if (message.reactions) {
-          const reactionsArray = [];
-          for (const reaction of message.reactions) {
-            reactionsArray.push(reaction.name);
-          }
-          if (reactionsArray.includes("white_check_mark")) {
-            triageStats.urgent.complete++;
-          } else if (reactionsArray.includes("eyes")) {
-            triageStats.urgent.in_review++;
-          } else {
-            triageStats.urgent.pending++;
-          }
-        } else {
-          triageStats.urgent.pending++;
-        }
+        triageStats.urgent = updateStats(message);
       }
       if (message.text && message.text.includes(":large_blue_circle:")) {
-        if (message.reactions) {
-          const reactionsArray = [];
-          for (const reaction of message.reactions) {
-            reactionsArray.push(reaction.name);
-          }
-          if (reactionsArray.includes("white_check_mark")) {
-            triageStats.medium.complete++;
-          } else if (reactionsArray.includes("eyes")) {
-            triageStats.medium.in_review++;
-          } else {
-            triageStats.medium.pending++;
-          }
-        } else {
-          triageStats.medium.pending++;
-        }
+        triageStats.medium = updateStats(message);
       }
       if (message.text && message.text.includes(":white_circle:")) {
-        if (message.reactions) {
-          const reactionsArray = [];
-          for (const reaction of message.reactions) {
-            reactionsArray.push(reaction.name);
-          }
-          if (reactionsArray.includes("white_check_mark")) {
-            triageStats.low.complete++;
-          } else if (reactionsArray.includes("eyes")) {
-            triageStats.low.in_review++;
-          } else {
-            triageStats.low.pending++;
-          }
-        } else {
-          triageStats.low.pending++;
-        }
+        triageStats.low = updateStats(message);
       }
     }
   } catch (error) {
     console.log(error);
   }
 
-  console.log(triageStats);
-
   return await {
+    // The shape of this payload aligns with what we've defined in manifest.ts
     outputs: {
       urgentItems:
         `There are ${triageStats.urgent.pending} items pending, ${triageStats.urgent.in_review} under review and ${triageStats.urgent.complete} completed in the last ${lookbackNumber} days`,
@@ -122,6 +80,44 @@ const triage_channel: FunctionHandler<any, any> = async ({ inputs, token }) => {
 
 export default triage_channel;
 
+function updateStats(message: Message): TriageStats {
+  const levelStats = {
+    pending: 0,
+    in_review: 0,
+    complete: 0,
+  };
+  if (message.reactions) {
+    const reactionsArray = [];
+    for (const reaction of message.reactions) {
+      reactionsArray.push(reaction.name);
+    }
+    if (reactionsArray.includes("white_check_mark")) {
+      levelStats.complete++;
+    } else if (reactionsArray.includes("eyes")) {
+      levelStats.in_review++;
+    } else {
+      levelStats.pending++;
+    }
+  } else {
+    levelStats.pending++;
+  }
+
+  return levelStats;
+}
+
+export interface TopLevelTriageStats {
+  urgent: TriageStats;
+  medium: TriageStats;
+  low: TriageStats;
+}
+
+export interface TriageStats {
+  pending: number;
+  in_review: number;
+  complete: number;
+}
+
+// These type definitions are copied from node-slack-sdk, and will eventually be removed
 export interface Message {
   type?: string;
   subtype?: string;
